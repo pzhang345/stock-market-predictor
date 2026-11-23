@@ -70,47 +70,6 @@ def build_market(prices):
     return np.concatenate([[1.0], np.cumprod(1 + market_r)])
 
 
-def rank_within_day(values, days):
-    """Rank `values` among the rows of the same day, scaled to roughly [-0.5, 0.5).
-
-    Returns rank / n - 0.5 with 0-based ranks and n = number of rows that day, so the
-    result is about uniform and comparable across days with different numbers of stocks.
-    """
-    values = np.asarray(values)
-    out = np.zeros(len(values), dtype=float)
-    for d in np.unique(days):
-        idx = np.flatnonzero(days == d)
-        ranks = np.argsort(np.argsort(values[idx]))
-        out[idx] = ranks / len(idx) - 0.5
-    return out
-
-
-def above_median_by_day(values, days):
-    """1 where `values` is strictly above that day's median among rows of the same day, else 0."""
-    values = np.asarray(values)
-    out = np.zeros(len(values), dtype=int)
-    for d in np.unique(days):
-        idx = np.flatnonzero(days == d)
-        out[idx] = values[idx] > np.median(values[idx])
-    return out
-
-
-def standardize_by_day(X, days, clip=3.0):
-    """Z-score each column of X across the rows of the same day, then clip to [-clip, clip].
-
-    Columns with zero std on a day are set to 0 for that day. Returns a new array.
-    """
-    out = np.zeros(X.shape, dtype=float)
-    for d in np.unique(days):
-        idx = np.flatnonzero(days == d)
-        block = X[idx]
-        mu = block.mean(axis=0)
-        sd = block.std(axis=0)
-        safe = np.where(sd > 0, sd, 1.0)
-        out[idx] = np.where(sd > 0, (block - mu) / safe, 0.0)
-    return np.clip(out, -clip, clip)
-
-
 def _series_features(p, e):
     """Feature columns for price series p at end-of-window indices e (uses only p[..e])."""
     r = p[1:] / p[:-1] - 1
@@ -133,14 +92,12 @@ def create_features(prices, market, horizon=1):
     market's return over the same days.
 
     Rows start at e=START so every feature has its full history.
-    Returns X, y, days, fwd where days[i] is row i's day as an index into `market`,
-    so rows from different stocks on the same calendar day share a value, and
-    fwd[i] is the stock's forward return over the horizon.
+    Returns X, y, days where days[i] is row i's day as an index into `market`,
+    so rows from different stocks on the same calendar day share a value.
     """
     X = []
     y = []
     days = []
-    fwd = []
     for ticker, p in prices.items():
         e = np.arange(START, len(p) - horizon)
         if len(e) == 0:
@@ -154,9 +111,8 @@ def create_features(prices, market, horizon=1):
         X.append(np.column_stack(cols))
         y.append((stock_fwd > market_fwd).astype(int))
         days.append(em)
-        fwd.append(stock_fwd)
 
-    return np.vstack(X), np.hstack(y), np.hstack(days), np.hstack(fwd)
+    return np.vstack(X), np.hstack(y), np.hstack(days)
 
 def evaluate_model(model, X, y):
     predictions = model.predict(X)
@@ -179,39 +135,13 @@ if __name__ == "__main__":
     market = build_market(prices)
     train, test, train_market = time_split(prices, market)
 
-    print(f"{'horizon':>8} {'ranked_acc':>11} {'beat_mkt_acc':>13} {'beat_mkt_base':>14} {'IC':>8}")
-    for horizon in [1, 5, 10, 20, 60, 2522]:
-        try:
-            train_X, train_y, train_days, train_fwd = create_features(train, train_market, horizon=horizon)
-            test_X, test_y, test_days, test_fwd = create_features(test, market, horizon=horizon)
-        except ValueError:  # horizon longer than the available history: no rows
-            print(f"{horizon:>8} {'n/a (no rows)':>11}")
-            continue
-
-        train_X = standardize_by_day(train_X, train_days)
-        test_X = standardize_by_day(test_X, test_days)
-        train_t = rank_within_day(train_fwd, train_days)
-        test_above = above_median_by_day(test_fwd, test_days)
+    print(f"{'horizon':>8} {'accuracy':>11}")
+    for horizon in [1, 5, 10, 20, 60, 252]:
+        train_X, train_y, _ = create_features(train, train_market, horizon=horizon)
+        test_X, test_y, test_days = create_features(test, market, horizon=horizon)
 
         model = TimeSeriesModel()
-        model.fit(train_X, train_t)
-        preds = model.predict_ranked(test_X, test_days)
-
-        ranked_acc = np.mean(preds == test_above)
-        beat_mkt_acc = np.mean(preds == test_y)
-        beat_mkt_base = np.mean(test_y == int(train_y.mean() > 0.5))
-
-        scores = model.score(test_X)
-        ics = []
-        for d in np.unique(test_days):
-            idx = np.flatnonzero(test_days == d)
-            if len(idx) < 3:
-                continue
-            a = rank_within_day(scores[idx], np.zeros(len(idx)))
-            b = rank_within_day(test_fwd[idx], np.zeros(len(idx)))
-            if a.std() == 0 or b.std() == 0:
-                continue
-            ics.append(np.corrcoef(a, b)[0, 1])
-        ic = np.mean(ics) if ics else float("nan")
-
-        print(f"{horizon:>8} {ranked_acc:>11.4f} {beat_mkt_acc:>13.4f} {beat_mkt_base:>14.4f} {ic:>8.4f}")
+        model.fit(train_X, train_y)
+        eval = evaluate_model(model, test_X, test_y)
+        print(f"{horizon:>8} {eval:>11.4f} {'':>7} {'':>11} {'':>9} {'':>16}")
+        base = np.mean(test_y == int(train_y.mean() > 0.5))
