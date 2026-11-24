@@ -1,4 +1,4 @@
-""" Predict whether a stock beats is positive over the next N days, using only data up to today.
+""" Predict whether a stock's return over the next day is positive, using only data up to today.
 The model is an autoregressive model trained on the stock's and the market's daily returns.
 
 To run use:
@@ -8,7 +8,9 @@ python timeseries/model.py
 import os
 import sys
 
+import matplotlib.pyplot as plt
 import numpy as np
+from sklearn.metrics import ConfusionMatrixDisplay, RocCurveDisplay, confusion_matrix
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from loadDataset import load_train, load_test
@@ -96,12 +98,28 @@ if __name__ == "__main__":
     train_market = build_market(train)
     market = build_market({**train, **test})
 
-    print(f"{'horizon':>8} {'accuracy':>11}")
-    for horizon in [1, 5, 10, 20, 60, 252]:
-        train_X, train_y = create_features(train, train_market, horizon=horizon)
-        test_X, test_y = create_features(test, market, horizon=horizon)
+    train_X, train_y = create_features(train, train_market)
+    test_X, test_y = create_features(test, market)
 
-        model = TimeSeriesModel()
-        model.fit(train_X, train_y)
-        acc = evaluate_model(model, test_X, test_y)
-        print(f"{horizon:>8} {acc:>11.4f}")
+    print(f"Train: {train_X.shape[0]} samples, {train_X.shape[1]} features")
+    print(f"Test: {test_X.shape[0]} samples, {test_X.shape[1]} features")
+    model = TimeSeriesModel()
+    model.fit(train_X, train_y)
+    acc = evaluate_model(model, test_X, test_y)
+    print(f"Test accuracy: {acc:.4f}")
+
+    # Rows are true labels, columns are predictions (0 = down, 1 = up)
+    mtrx = confusion_matrix(test_y, model.predict(test_X))
+    print("Confusion matrix:")
+    print(mtrx)
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+
+    RocCurveDisplay.from_predictions(test_y, model.score(test_X), name="Linear AR", plot_chance_level=True, ax=ax1)
+    ax1.set_title("ROC curve – next-day direction")
+
+    ConfusionMatrixDisplay(confusion_matrix=mtrx, display_labels=["Down", "Up"]).plot(ax=ax2, cmap="Blues", colorbar=False)
+    ax2.set_title("Confusion matrix")
+
+    plt.tight_layout()
+    plt.show()
