@@ -17,7 +17,8 @@ import torch
 import os
 import sys
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import confusion_matrix, roc_auc_score
+from sklearn.metrics import confusion_matrix, roc_auc_score, RocCurveDisplay, ConfusionMatrixDisplay
+import matplotlib.pyplot as plt
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from loadDataset import load_train, load_test
@@ -40,6 +41,7 @@ def featurize(split, test_days=60, price_increase_percent=-0.05):
         arrys.append(arry)
     feats = np.array(arrys)
     n_days = 2147 + 365 - test_days
+
     y = feats[:, n_days:]
     prices = feats[:, :n_days+1]
     weekly = prices[:, ::5]
@@ -99,3 +101,13 @@ if __name__=="__main__":
         roc = roc_auc_score(y_score=y_test_scores, y_true=y_test)
         print(mtrx)
         print("roc: ", roc)
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+
+        RocCurveDisplay.from_predictions(y_test, y_test_scores, ax=ax1, name="Model", plot_chance_level=True)
+        ax1.set_title("ROC Curve")
+
+        ConfusionMatrixDisplay(confusion_matrix=mtrx).plot(ax=ax2, cmap="Blues", colorbar=False)
+        ax2.set_title("Confusion Matrix")
+
+        plt.tight_layout()
+        plt.show()
