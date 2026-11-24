@@ -2,8 +2,8 @@
 Code for MLP model, featurization, training, and evaluation
 Author: Nick Usich
 
-Goal: based on 2148 days, can the MLP predict if the stock beats the S&P500 in the next year? (+ 8.5% of price)
-Model: MLP with 2500 input features, 3 hidden layers with 2x, 1/2, 1/4, output
+Goal: based on weekly prices, can the MLP predict whether a stock declines 5% in the next 60 days?
+Model: MLP
 Features: center/scale to mean of zero and variance of 1. Binary label: beat/not beat
 Train: 500 samples
 Eval: 50 samples
